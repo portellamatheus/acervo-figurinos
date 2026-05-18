@@ -1,0 +1,2321 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acervo de Figurinos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,400;1,600&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import {
+      getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
+      onSnapshot, serverTimestamp, enableIndexedDbPersistence
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import {
+      getStorage, ref, uploadBytes, getDownloadURL, deleteObject
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBu-6L9crKFXtOBRfOWs_96f3A5OsJ7gNY",
+      authDomain: "acervo-figurinos.firebaseapp.com",
+      databaseURL: "https://acervo-figurinos-default-rtdb.firebaseio.com",
+      projectId: "acervo-figurinos",
+      storageBucket: "acervo-figurinos.firebasestorage.app",
+      messagingSenderId: "976611294453",
+      appId: "1:976611294453:web:1fbd7c130c1d2703d219bc"
+    };
+
+    let db, storage, isConfigured = false;
+
+    try {
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      storage = getStorage(app);
+      isConfigured = true;
+
+      // Persistência offline — dados ficam no navegador mesmo sem internet
+      enableIndexedDbPersistence(db).catch(e => {
+        if (e.code === 'failed-precondition') console.warn('Persistência: múltiplas abas abertas');
+        else if (e.code === 'unimplemented') console.warn('Persistência não suportada neste browser');
+      });
+
+      console.log("✅ Firebase conectado!");
+    } catch(e) {
+      console.error("❌ Erro ao conectar Firebase:", e);
+    }
+
+    // ── Ouvir coleção sem orderBy (evita erro de índice) ─────────
+    // Ordenação feita no JS para não depender de índice composto
+    function ouvirColecao(nomeCol, callback) {
+      if (!isConfigured) { window.ouvirLocal(nomeCol, callback); return () => {}; }
+      return onSnapshot(
+        collection(db, nomeCol),
+        { includeMetadataChanges: false },
+        snap => {
+          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          // Ordena por criadoEm desc no cliente
+          docs.sort((a, b) => {
+            const ta = a.criadoEm?.toMillis ? a.criadoEm.toMillis() : new Date(a.criadoEm||0).getTime();
+            const tb = b.criadoEm?.toMillis ? b.criadoEm.toMillis() : new Date(b.criadoEm||0).getTime();
+            return tb - ta;
+          });
+          callback(docs);
+        },
+        err => {
+          console.error(`Erro ao ouvir ${nomeCol}:`, err.code, err.message);
+          // Fallback para local se der erro de permissão
+          window.ouvirLocal(nomeCol, callback);
+        }
+      );
+    }
+
+    // ── Upload de imagem ─────────────────────────────────────────
+    async function uploadImagem(file) {
+      if (!isConfigured || !storage) throw new Error("Firebase Storage não disponível");
+      const nome = `figurinos/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+      const snap = await uploadBytes(ref(storage, nome), file);
+      return await getDownloadURL(snap.ref);
+    }
+
+    // ── CRUD genérico ────────────────────────────────────────────
+    async function salvar(col, dados) {
+      if (!isConfigured) return window.usarModoLocal(col, dados);
+      const ts = new Date().toISOString(); // timestamp ISO como fallback
+      return await addDoc(collection(db, col), { ...dados, criadoEm: serverTimestamp(), criadoEmISO: ts });
+    }
+    async function atualizar(col, id, dados) {
+      if (!isConfigured) return window.atualizarLocal(col, id, dados);
+      await updateDoc(doc(db, col, id), { ...dados, atualizadoEm: serverTimestamp() });
+    }
+    async function deletar(col, id) {
+      if (!isConfigured) return window.deletarLocal(col, id);
+      await deleteDoc(doc(db, col, id));
+    }
+
+    // ── Expor API global ─────────────────────────────────────────
+    window.Firebase = {
+      isConfigured: () => isConfigured,
+      // Figurinos
+      salvarFigurino:    (d) => salvar('figurinos', d),
+      atualizarFigurino: (id, d) => atualizar('figurinos', id, d),
+      deletarFigurino:   async (id, fotoPath) => {
+        await deletar('figurinos', id);
+        if (fotoPath && storage) try { await deleteObject(ref(storage, fotoPath)); } catch(_){}
+      },
+      ouvirFigurinos:    (cb) => ouvirColecao('figurinos', cb),
+      // Alunos
+      salvarAluno:       (d) => salvar('alunos', d),
+      atualizarAluno:    (id, d) => atualizar('alunos', id, d),
+      deletarAluno:      (id) => deletar('alunos', id),
+      ouvirAlunos:       (cb) => ouvirColecao('alunos', cb),
+      // Empréstimos
+      salvarEmprestimo:  (d) => salvar('emprestimos', d),
+      atualizarEmprestimo: (id, d) => atualizar('emprestimos', id, d),
+      ouvirEmprestimos:  (cb) => ouvirColecao('emprestimos', cb),
+      // Storage
+      uploadImagem,
+    };
+
+    window.dispatchEvent(new Event('firebase-ready'));
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      /* Paleta: papel envelhecido, tinta, vermelho teatral, dourado */
+      --bg:        #f5f0e8;
+      --bg2:       #ede7d9;
+      --surface:   #faf7f2;
+      --surface2:  #f0ead8;
+      --border:    #d4c9b0;
+      --border2:   #c2b49a;
+      --text:      #1a1208;
+      --text2:     #6b5c3e;
+      --text3:     #9c8a6e;
+      --accent:    #8b1a1a;   /* vermelho teatral */
+      --accent2:   #b8860b;   /* dourado antigo */
+      --accent3:   #2d4a3e;   /* verde musgo */
+      --green:     #2d6a4f;
+      --red:       #8b1a1a;
+      --blue:      #1a3a5c;
+      --purple:    #4a2d6b;
+      --radius:    4px;
+      --radius-lg: 8px;
+      --font-head: 'Playfair Display', serif;
+      --font-serif: 'Cormorant Garamond', serif;
+      --font-body: 'Inter', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+      --shadow:    0 2px 16px rgba(26,18,8,.10);
+      --shadow-lg: 0 8px 40px rgba(26,18,8,.16);
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Textura sutil de papel */
+    body::before {
+      content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      opacity:.6;
+    }
+
+    #app { display: flex; height: 100vh; position:relative; z-index:1; }
+
+    /* ── Banner ── */
+    #config-banner {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+      background: var(--accent);
+      color: #faf7f2; font-family: var(--font-body); font-weight: 500;
+      padding: 10px 20px; text-align: center; font-size: 13px;
+      display: none; letter-spacing:.02em;
+    }
+    #config-banner a { color: #f5d78e; font-weight: 600; text-decoration: underline; }
+    #config-banner.show { display: block; }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 260px; min-width: 260px;
+      background: var(--text);
+      display: flex; flex-direction: column;
+      transition: width .3s ease, min-width .3s ease;
+      overflow: hidden;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    /* Linha decorativa lateral */
+    #sidebar::after {
+      content:''; position:absolute; top:0; right:0; bottom:0;
+      width:3px;
+      background: linear-gradient(to bottom, var(--accent2), var(--accent), var(--accent2));
+    }
+
+    #sidebar-header {
+      padding: 28px 20px 20px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+    }
+    .logo-eyebrow {
+      font-family: var(--font-body); font-size: 9px; font-weight: 600;
+      letter-spacing: .18em; text-transform: uppercase; color: var(--accent2);
+      margin-bottom: 6px;
+    }
+    .logo-title {
+      font-family: var(--font-head); font-size: 22px; font-weight: 900;
+      color: #faf7f2; line-height: 1.1; white-space: nowrap;
+    }
+    .logo-title em { font-style: italic; color: var(--accent2); }
+    .logo-sub {
+      font-family: var(--font-serif); font-style: italic;
+      font-size: 13px; color: rgba(250,247,242,.5); margin-top: 4px;
+      white-space: nowrap;
+    }
+
+    #sidebar nav { flex: 1; padding: 16px 12px; overflow-y: auto; }
+
+    /* Grupos nav */
+    .nav-group-label {
+      font-size: 9px; font-weight: 700; letter-spacing: .18em;
+      text-transform: uppercase; color: rgba(250,247,242,.3);
+      padding: 12px 10px 6px; display: block;
+    }
+
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 12px; border-radius: var(--radius);
+      color: rgba(250,247,242,.55); cursor: pointer; transition: all .2s;
+      text-decoration: none; margin-bottom: 2px; white-space: nowrap;
+      position: relative;
+    }
+    .nav-item:hover {
+      background: rgba(250,247,242,.08);
+      color: rgba(250,247,242,.9);
+    }
+    .nav-item.active {
+      background: rgba(184,134,11,.15);
+      color: #f5d78e;
+    }
+    .nav-item.active::before {
+      content:''; position:absolute; left:0; top:4px; bottom:4px;
+      width:3px; background:var(--accent2); border-radius:0 2px 2px 0;
+    }
+    .nav-icon {
+      font-size: 16px; flex-shrink: 0; width: 22px; text-align: center;
+      opacity:.8;
+    }
+    .nav-item.active .nav-icon { opacity:1; }
+    .nav-label {
+      font-family: var(--font-body); font-size: 13.5px; font-weight: 500;
+      overflow: hidden; white-space: nowrap;
+    }
+    .nav-badge {
+      margin-left: auto; background: var(--accent);
+      color: #faf7f2; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align:center;
+    }
+
+    #sidebar-footer {
+      padding: 16px 12px;
+      border-top: 1px solid rgba(255,255,255,.08);
+    }
+    .sidebar-footer-text {
+      font-family: var(--font-serif); font-style: italic;
+      font-size: 11px; color: rgba(250,247,242,.25);
+      text-align: center; line-height: 1.6;
+    }
+
+    /* ── Main ── */
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    #topbar {
+      padding: 0 32px;
+      height: 64px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 16px;
+      background: var(--surface);
+      box-shadow: 0 1px 0 var(--border);
+    }
+    #menu-btn { display:none; }
+    #page-title {
+      font-family: var(--font-head); font-size: 19px; font-weight: 700;
+      flex: 1; color: var(--text); letter-spacing:-.01em;
+    }
+    #page-title span {
+      font-family: var(--font-serif); font-style: italic;
+      font-weight: 400; font-size: 15px; color: var(--text2); margin-left: 10px;
+    }
+    #topbar-actions { display:flex; gap:8px; align-items:center; }
+
+    /* Breadcrumb decorativo */
+    .topbar-deco {
+      font-family: var(--font-serif); font-style: italic;
+      font-size: 13px; color: var(--text3);
+    }
+
+    #content { flex: 1; overflow-y: auto; padding: 32px; }
+
+    /* ── Section headers ── */
+    .section-header {
+      display: flex; align-items: baseline; gap: 14px; margin-bottom: 24px;
+    }
+    .section-title {
+      font-family: var(--font-head); font-size: 24px; font-weight: 700;
+      color: var(--text); letter-spacing:-.02em;
+    }
+    .section-rule {
+      flex:1; height:1px; background: linear-gradient(to right, var(--border), transparent);
+    }
+    .section-count {
+      font-family: var(--font-mono); font-size: 12px; color: var(--text3);
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 22px;
+      box-shadow: var(--shadow);
+    }
+    .card-grid { display: grid; gap: 16px; }
+
+    /* Stat cards — estilo etiqueta de museu */
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 22px 20px;
+      display: flex; align-items: flex-start; gap: 16px;
+      box-shadow: var(--shadow);
+      position: relative; overflow: hidden;
+      cursor: pointer; transition: transform .2s, box-shadow .2s;
+    }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+    .stat-card::after {
+      content:''; position:absolute; bottom:0; left:0; right:0;
+      height:3px;
+    }
+    .stat-card.accent-red::after { background: var(--accent); }
+    .stat-card.accent-gold::after { background: var(--accent2); }
+    .stat-card.accent-green::after { background: var(--green); }
+    .stat-card.accent-blue::after { background: var(--blue); }
+    .stat-card.accent-purple::after { background: var(--purple); }
+
+    .stat-icon {
+      width: 44px; height: 44px; border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center; font-size: 20px;
+      flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border);
+    }
+    .stat-value {
+      font-family: var(--font-head); font-size: 32px; font-weight: 900;
+      line-height: 1; color: var(--text);
+    }
+    .stat-label {
+      font-family: var(--font-body); font-size: 12px; font-weight: 500;
+      color: var(--text2); margin-top: 4px; text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 9px 20px; border-radius: var(--radius); border: none;
+      font-family: var(--font-body); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all .2s; text-decoration: none;
+      letter-spacing: .02em;
+    }
+    .btn-primary {
+      background: var(--accent); color: #faf7f2;
+      box-shadow: 0 2px 8px rgba(139,26,26,.3);
+    }
+    .btn-primary:hover { background: #6e1515; box-shadow: 0 4px 16px rgba(139,26,26,.4); }
+    .btn-secondary {
+      background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--bg2); border-color: var(--border2); }
+    .btn-ghost {
+      background: transparent; color: var(--text2);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--border2); }
+    .btn-danger {
+      background: rgba(139,26,26,.08); color: var(--red);
+      border: 1px solid rgba(139,26,26,.2);
+    }
+    .btn-danger:hover { background: rgba(139,26,26,.15); }
+    .btn-gold {
+      background: var(--accent2); color: #1a1208;
+      box-shadow: 0 2px 8px rgba(184,134,11,.3);
+    }
+    .btn-gold:hover { background: #9a6f0a; }
+    .btn-sm { padding: 6px 14px; font-size: 12px; }
+    .btn-lg { padding: 12px 28px; font-size: 14px; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 18px; }
+    .form-label {
+      display: block; font-size: 11px; font-weight: 700; color: var(--text2);
+      margin-bottom: 7px; text-transform: uppercase; letter-spacing: .1em;
+    }
+    .form-input, .form-select, .form-textarea {
+      width: 100%; padding: 10px 14px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text);
+      font-family: var(--font-body); font-size: 14px;
+      transition: border-color .2s, box-shadow .2s; outline: none;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      border-color: var(--accent2);
+      box-shadow: 0 0 0 3px rgba(184,134,11,.15);
+    }
+    .form-textarea { resize: vertical; min-height: 88px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .form-error { color: var(--red); font-size: 12px; margin-top: 5px; }
+    .form-hint { color: var(--text3); font-size: 12px; margin-top: 4px; font-style:italic; }
+
+    /* ── Tables — estilo livro de registro ── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { position: sticky; top: 0; z-index: 1; }
+    th {
+      text-align: left; padding: 10px 18px;
+      font-family: var(--font-body); font-size: 10px; font-weight: 700;
+      color: var(--text2); background: var(--bg2);
+      border-bottom: 2px solid var(--border);
+      text-transform: uppercase; letter-spacing: .1em;
+    }
+    td { padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    tbody tr:hover td { background: rgba(184,134,11,.04); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border-radius: 2px;
+      font-family: var(--font-body); font-size: 11px; font-weight: 600;
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .badge-green { background: rgba(45,106,79,.12); color: var(--green); border:1px solid rgba(45,106,79,.25); }
+    .badge-red { background: rgba(139,26,26,.1); color: var(--red); border:1px solid rgba(139,26,26,.2); }
+    .badge-blue { background: rgba(26,58,92,.1); color: var(--blue); border:1px solid rgba(26,58,92,.2); }
+    .badge-yellow { background: rgba(184,134,11,.12); color: var(--accent2); border:1px solid rgba(184,134,11,.25); }
+    .badge-gray { background: var(--surface2); color: var(--text2); border:1px solid var(--border); }
+    .badge-purple { background: rgba(74,45,107,.1); color: var(--purple); border:1px solid rgba(74,45,107,.2); }
+
+    /* ── Figurino Cards — estilo prateleira de museu ── */
+    .figurino-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 18px;
+    }
+    .figurino-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow: hidden;
+      transition: all .25s; box-shadow: var(--shadow);
+      position: relative;
+    }
+    .figurino-card:hover {
+      border-color: var(--accent2); transform: translateY(-3px);
+      box-shadow: var(--shadow-lg);
+    }
+    .figurino-card-num {
+      position: absolute; top: 10px; left: 10px;
+      font-family: var(--font-mono); font-size: 10px;
+      background: rgba(26,18,8,.6); color: #f5d78e;
+      padding: 2px 7px; border-radius: 2px; z-index:1;
+    }
+    .figurino-img {
+      width: 100%; height: 165px; background: var(--bg2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 44px; position:relative; overflow:hidden;
+    }
+    .figurino-img img { width: 100%; height: 100%; object-fit: cover; }
+    .figurino-info { padding: 14px 16px 16px; }
+    .figurino-nome {
+      font-family: var(--font-head); font-weight: 700; font-size: 15px;
+      margin-bottom: 5px; color: var(--text); line-height: 1.3;
+      cursor:pointer;
+    }
+    .figurino-nome:hover { color: var(--accent); }
+    .figurino-meta {
+      font-size: 11px; color: var(--text3);
+      display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+      font-family: var(--font-body);
+    }
+    .figurino-meta-sep { color: var(--border2); }
+
+    /* ── Upload ── */
+    .upload-area {
+      border: 2px dashed var(--border2); border-radius: var(--radius-lg);
+      padding: 36px; text-align: center; cursor: pointer; transition: all .2s;
+      background: var(--surface2);
+    }
+    .upload-area:hover, .upload-area.drag {
+      border-color: var(--accent2); background: rgba(184,134,11,.05);
+    }
+    .upload-preview {
+      width: 100%; max-height: 210px; object-fit: contain;
+      border-radius: var(--radius); margin-top: 12px;
+    }
+    .upload-icon { font-size: 36px; margin-bottom: 10px; opacity:.7; }
+    .upload-hint { font-family:var(--font-serif); font-style:italic; color:var(--text2); font-size:14px; }
+
+    /* ── Search ── */
+    .search-wrap { position: relative; }
+    .search-wrap input { padding-left: 38px; }
+    .search-icon {
+      position: absolute; left: 12px; top: 50%;
+      transform: translateY(-50%); color: var(--text3); font-size: 14px;
+    }
+
+    /* ── Modals ── */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(26,18,8,.65);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; padding: 20px; backdrop-filter: blur(3px);
+    }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); max-width: 560px; width: 100%;
+      max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg);
+    }
+    .modal-header {
+      padding: 22px 26px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--bg2);
+    }
+    .modal-title {
+      font-family: var(--font-head); font-weight: 700; font-size: 19px;
+      color: var(--text);
+    }
+    .modal-body { padding: 26px; }
+    .modal-footer {
+      padding: 18px 26px; border-top: 1px solid var(--border);
+      display: flex; gap: 10px; justify-content: flex-end;
+      background: var(--bg2);
+    }
+    .modal-close {
+      cursor: pointer; color: var(--text2); background: none; border: none;
+      font-size: 20px; line-height:1; padding: 2px;
+    }
+    .modal-close:hover { color: var(--red); }
+
+    /* ── Toast ── */
+    #toast-container {
+      position: fixed; bottom: 24px; right: 24px;
+      display: flex; flex-direction: column; gap: 10px; z-index: 9998;
+    }
+    .toast {
+      background: var(--text); border: 1px solid rgba(250,247,242,.15);
+      border-radius: var(--radius); padding: 12px 18px; font-size: 13px;
+      display: flex; align-items: center; gap: 10px; min-width: 280px;
+      animation: slideIn .3s ease; box-shadow: var(--shadow-lg);
+      color: rgba(250,247,242,.9);
+    }
+    .toast.success { border-left: 3px solid #4ade80; }
+    .toast.error   { border-left: 3px solid #f87171; }
+    .toast.info    { border-left: 3px solid #60a5fa; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+    /* ── Empty state ── */
+    .empty { text-align: center; padding: 64px 20px; color: var(--text3); }
+    .empty-icon {
+      font-size: 52px; margin-bottom: 18px; display:block;
+      opacity:.6;
+    }
+    .empty-title {
+      font-family: var(--font-head); font-size: 20px; color: var(--text2);
+      margin-bottom: 8px;
+    }
+    .empty-text { font-family: var(--font-serif); font-style:italic; font-size: 15px; margin-bottom: 24px; }
+
+    /* ── Chips ── */
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      padding: 5px 14px; border-radius: 2px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border); cursor: pointer; transition: all .2s;
+      color: var(--text2); text-transform: uppercase; letter-spacing: .06em;
+      background: var(--surface2);
+    }
+    .chip.selected { background: var(--accent); color: #faf7f2; border-color: var(--accent); }
+    .chip:hover:not(.selected) { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      #sidebar { position: fixed; left: -260px; height: 100%; z-index: 100; transition: left .3s; }
+      #sidebar.mobile-open { left: 0; }
+      #menu-btn { display: inline-flex !important; }
+      .form-row { grid-template-columns: 1fr; }
+      .figurino-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+      #content { padding: 20px; }
+    }
+
+    /* ── Loader ── */
+    .loader { display: flex; flex-direction:column; align-items: center; justify-content: center; padding: 80px; gap:16px; }
+    .spin {
+      width: 36px; height: 36px; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .loader-text { font-family: var(--font-serif); font-style:italic; color:var(--text3); font-size:15px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Cor dot ── */
+    .cor-dot {
+      width: 12px; height: 12px; border-radius: 2px;
+      display: inline-block; border: 1px solid rgba(26,18,8,.2);
+      vertical-align: middle;
+    }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 26px; }
+    .tab {
+      padding: 9px 20px; cursor: pointer; font-size: 12px; font-weight: 700;
+      color: var(--text2); border-bottom: 2px solid transparent;
+      margin-bottom: -2px; transition: all .2s;
+      text-transform: uppercase; letter-spacing: .08em;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Página de config ── */
+    .code-block {
+      background: var(--text); border: 1px solid rgba(250,247,242,.1);
+      border-radius: var(--radius); padding: 18px;
+      font-family: var(--font-mono); font-size: 12px; color: #f5d78e;
+      overflow-x: auto; white-space: pre; margin: 12px 0; line-height:1.7;
+    }
+    .step { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 18px; }
+    .step-num {
+      min-width: 28px; height: 28px; background: var(--accent); color: #faf7f2;
+      border-radius: 2px; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; flex-shrink:0; margin-top:1px;
+    }
+    .step-text { font-size:14px; color:var(--text); line-height:1.6; }
+
+    /* ── Overlay mobile ── */
+    .overlay { position: fixed; inset: 0; background: rgba(26,18,8,.55); z-index: 99; display: none; }
+    .overlay.show { display: block; }
+
+    /* ── Divisores decorativos ── */
+    .divider {
+      display:flex; align-items:center; gap:12px;
+      margin: 24px 0; color:var(--text3); font-family:var(--font-serif);
+      font-style:italic; font-size:13px;
+    }
+    .divider::before, .divider::after {
+      content:''; flex:1; height:1px; background:var(--border);
+    }
+
+    /* ── Highlight de linha da tabela ── */
+    tr.row-warn td { background: rgba(139,26,26,.04) !important; }
+    tr.row-warn td:first-child { border-left: 3px solid var(--accent); }
+
+    /* ── Cards de formulário ── */
+    .form-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow:hidden; box-shadow:var(--shadow);
+    }
+    .form-card-header {
+      padding: 20px 26px; background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display:flex; align-items:center; gap:12px;
+    }
+    .form-card-header-icon { font-size:22px; }
+    .form-card-title {
+      font-family:var(--font-head); font-size:18px; font-weight:700;
+    }
+    .form-card-body { padding: 26px; }
+
+    /* ── Figurino pick list ── */
+    .pick-item {
+      display:flex; align-items:center; gap:12px; padding:12px 16px;
+      border-bottom:1px solid var(--border); cursor:pointer;
+      transition: background .15s;
+    }
+    .pick-item:last-child { border-bottom:none; }
+    .pick-item:hover { background: rgba(184,134,11,.05); }
+    .pick-item.picked { background: rgba(184,134,11,.1); }
+    .pick-check {
+      width:20px; height:20px; border-radius:2px;
+      border:2px solid var(--border); display:flex; align-items:center;
+      justify-content:center; flex-shrink:0; transition:all .15s;
+    }
+    .pick-item.picked .pick-check {
+      background:var(--accent2); border-color:var(--accent2);
+    }
+    .pick-check-icon { display:none; font-size:12px; color:#1a1208; font-weight:700; }
+    .pick-item.picked .pick-check-icon { display:block; }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width:6px; height:6px; }
+    ::-webkit-scrollbar-track { background: var(--bg2); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius:3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+  </style>
+</head>
+<body>
+
+<div id="config-banner" class="show">
+  ⚠️ Firebase não configurado — dados salvos apenas localmente.
+  <a href="#" onclick="document.querySelector('[data-page=config]').click(); return false;">Clique aqui para configurar o banco em nuvem →</a>
+  <button onclick="this.parentElement.style.display='none'" style="background:none;border:none;cursor:pointer;margin-left:12px;font-size:16px;color:#0c0c10">✕</button>
+</div>
+
+<div id="toast-container"></div>
+<div class="overlay" id="overlay" onclick="closeSidebar()"></div>
+
+<div id="app">
+  <!-- Sidebar -->
+  <aside id="sidebar" class="collapsed">
+    <div id="sidebar-header">
+      <div class="logo-icon">🎭</div>
+      <div class="logo-text">Figurinos</div>
+    </div>
+    <nav id="nav">
+      <div class="nav-item active" data-page="dashboard">
+        <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+      </div>
+      <div class="nav-item" data-page="figurinos">
+        <span class="nav-icon">👗</span><span class="nav-label">Figurinos</span>
+      </div>
+      <div class="nav-item" data-page="alunos">
+        <span class="nav-icon">👥</span><span class="nav-label">Alunos</span>
+      </div>
+      <div class="nav-item" data-page="emprestimos">
+        <span class="nav-icon">🤝</span><span class="nav-label">Empréstimos</span>
+      </div>
+      <div class="nav-item" data-page="devolucoes">
+        <span class="nav-icon">↩️</span><span class="nav-label">Devoluções</span>
+      </div>
+      <div class="nav-item" data-page="historico">
+        <span class="nav-icon">📋</span><span class="nav-label">Histórico</span>
+      </div>
+      <div class="nav-item" data-page="relatorios">
+        <span class="nav-icon">📑</span><span class="nav-label">Relatórios</span>
+      </div>
+      <div class="nav-item" data-page="analises">
+        <span class="nav-icon">📈</span><span class="nav-label">Análises</span>
+      </div>
+      <div class="nav-item" data-page="config">
+        <span class="nav-icon">⚙️</span><span class="nav-label">Configurações</span>
+      </div>
+    </nav>
+    <div id="sidebar-toggle" onclick="toggleSidebar()">☰</div>
+  </aside>
+
+  <!-- Main -->
+  <div id="main">
+    <div id="topbar">
+      <button class="btn btn-secondary btn-sm" style="display:none" id="menu-btn" onclick="openSidebar()">☰</button>
+      <div id="page-title">Dashboard</div>
+      <div id="topbar-actions"></div>
+    </div>
+    <div id="content">
+      <div class="loader"><div class="spin"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// STATE & LOCAL STORAGE FALLBACK
+// ════════════════════════════════════════════════════════════
+const state = {
+  page: 'dashboard',
+  figurinos: [],
+  alunos: [],
+  emprestimos: [],
+  historico: [],
+  filtros: { busca: '', categoria: '', cor: '', tamanho: '', estado: '' },
+  unsubs: [],
+};
+
+// Modo local (sem Firebase)
+const LS = {
+  get(key) { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } },
+  set(key, val) { localStorage.setItem(key, JSON.stringify(val)); },
+};
+
+window.usarModoLocal = (col, dados) => {
+  const arr = LS.get(col);
+  const item = { ...dados, id: Date.now().toString(), criadoEm: new Date().toISOString() };
+  arr.unshift(item);
+  LS.set(col, arr);
+  state[col] = arr;
+  render();
+};
+window.atualizarLocal = (col, id, dados) => {
+  const arr = LS.get(col).map(i => i.id === id ? { ...i, ...dados } : i);
+  LS.set(col, arr);
+  state[col] = arr;
+  render();
+};
+window.deletarLocal = (col, id) => {
+  const arr = LS.get(col).filter(i => i.id !== id);
+  LS.set(col, arr);
+  state[col] = arr;
+  render();
+};
+window.ouvirLocal = (col, cb) => {
+  state[col] = LS.get(col);
+  cb(state[col]);
+};
+
+// ════════════════════════════════════════════════════════════
+// FIREBASE INIT
+// ════════════════════════════════════════════════════════════
+function initFirebase() {
+  const FB = window.Firebase;
+  if (!FB) return;
+
+  if (FB.isConfigured()) {
+    document.getElementById('config-banner').classList.remove('show');
+  }
+
+  state.unsubs.forEach(u => typeof u === 'function' && u());
+  state.unsubs = [];
+
+  state.unsubs.push(FB.ouvirFigurinos(data => { state.figurinos = data; render(); }));
+  state.unsubs.push(FB.ouvirAlunos(data => { state.alunos = data; render(); }));
+  state.unsubs.push(FB.ouvirEmprestimos(data => {
+    state.emprestimos = data;
+    // Auto-marcar atrasados
+    data.forEach(e => {
+      if (e.status === 'ativo' && e.dataDevolucao && new Date(e.dataDevolucao) < new Date()) {
+        if (FB.isConfigured()) FB.atualizarEmprestimo(e.id, { status: 'atrasado' });
+      }
+    });
+    render();
+  }));
+}
+
+window.addEventListener('firebase-ready', () => {
+  setTimeout(initFirebase, 100);
+});
+// Fallback se firebase-ready já disparou
+setTimeout(() => {
+  if (!state.figurinos.length && !state.alunos.length) initFirebase();
+}, 800);
+
+// ════════════════════════════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════════════════════════════
+document.getElementById('nav').addEventListener('click', e => {
+  const item = e.target.closest('.nav-item');
+  if (!item) return;
+  const page = item.dataset.page;
+  if (page) navigate(page);
+  closeSidebar();
+});
+
+function navigate(page, params = {}) {
+  state.page = page;
+  state.params = params;
+  document.querySelectorAll('.nav-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.page === page));
+  render();
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('collapsed');
+}
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('mobile-open');
+  document.getElementById('overlay').classList.add('show');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('overlay').classList.remove('show');
+}
+
+// ════════════════════════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════════════════════════
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  const icons = { success: '✅', error: '❌', info: 'ℹ️' };
+  el.innerHTML = `<span>${icons[type]||''}</span><span>${msg}</span>`;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ════════════════════════════════════════════════════════════
+// RENDER ENGINE
+// ════════════════════════════════════════════════════════════
+function render() {
+  const titles = {
+    dashboard: 'Dashboard', figurinos: 'Figurinos', alunos: 'Alunos',
+    emprestimos: 'Empréstimos', devolucoes: 'Devoluções',
+    historico: 'Histórico', relatorios: 'Relatórios Semestrais',
+    analises: 'Análises', config: 'Configurações',
+    'figurino-novo': 'Novo Figurino', 'figurino-editar': 'Editar Figurino',
+    'aluno-novo': 'Novo Aluno', 'aluno-editar': 'Editar Aluno',
+    'emprestimo-novo': 'Novo Empréstimo',
+  };
+  document.getElementById('page-title').textContent = titles[state.page] || state.page;
+
+  const content = document.getElementById('content');
+  const actions = document.getElementById('topbar-actions');
+  actions.innerHTML = '';
+
+  switch(state.page) {
+    case 'dashboard': content.innerHTML = renderDashboard(); break;
+    case 'figurinos': content.innerHTML = renderFigurinos(); actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="navigate('figurino-novo')">＋ Novo Figurino</button>`; break;
+    case 'figurino-novo': content.innerHTML = renderFigurinoForm(); break;
+    case 'figurino-editar': content.innerHTML = renderFigurinoForm(state.params?.id); break;
+    case 'alunos': content.innerHTML = renderAlunos(); actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="navigate('aluno-novo')">＋ Novo Aluno</button>`; break;
+    case 'aluno-novo': content.innerHTML = renderAlunoForm(); break;
+    case 'aluno-editar': content.innerHTML = renderAlunoForm(state.params?.id); break;
+    case 'emprestimos': content.innerHTML = renderEmprestimos(); actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="navigate('emprestimo-novo')">＋ Novo Empréstimo</button>`; break;
+    case 'emprestimo-novo': content.innerHTML = renderEmprestimoForm(); break;
+    case 'devolucoes': content.innerHTML = renderDevolucoes(); break;
+    case 'historico': content.innerHTML = renderHistorico(); break;
+    case 'relatorios': content.innerHTML = renderRelatorios(); break;
+    case 'analises': content.innerHTML = renderAnalises(); break;
+    case 'config': content.innerHTML = renderConfig(); break;
+    default: content.innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><p class="empty-text">Página não encontrada</p></div>';
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════
+const CORES_HEX = {
+  vermelho:'#ef4444', azul:'#3b82f6', verde:'#10b981', amarelo:'#fbbf24',
+  preto:'#374151', branco:'#e5e7eb', roxo:'#8b5cf6', rosa:'#ec4899',
+  laranja:'#f97316', marrom:'#92400e', cinza:'#6b7280', dourado:'#d97706',
+  prata:'#9ca3af', outro:'#6b7280'
+};
+const ESTADOS_LABEL = { novo:'Novo', bom:'Bom', desgastado:'Desgastado', otimo:'Ótimo', regular:'Regular', ruim:'Ruim' };
+const CATEGORIAS_LABEL = { figurino:'Figurino', acessorio:'Acessório', cena:'Cena/Adereço' };
+const TAMANHOS = ['PP','P','M','G','GG','XG','U'];
+const CORES = Object.keys(CORES_HEX);
+const CATEGORIAS = Object.keys(CATEGORIAS_LABEL);
+const ESTADOS = ['novo','bom','desgastado','otimo','regular','ruim'];
+
+function formatDate(d) {
+  if (!d) return '—';
+  const dt = d?.toDate ? d.toDate() : (typeof d === 'string' ? new Date(d) : d);
+  if (isNaN(dt)) return '—';
+  return dt.toLocaleDateString('pt-BR');
+}
+function diasAte(d) {
+  if (!d) return null;
+  const dt = d?.toDate ? d.toDate() : (typeof d === 'string' ? new Date(d) : d);
+  return Math.ceil((dt - new Date()) / 86400000);
+}
+
+// ════════════════════════════════════════════════════════════
+// PAGES
+// ════════════════════════════════════════════════════════════
+
+function renderDashboard() {
+  const totalFig = state.figurinos.reduce((s,f) => s + (f.quantidade||1), 0);
+  const disponiveis = state.figurinos.reduce((s,f) => s + (f.quantidadeDisponivel||f.quantidade||1), 0);
+  const ativos = state.emprestimos.filter(e => e.status === 'ativo').length;
+  const atrasados = state.emprestimos.filter(e => e.status === 'atrasado').length;
+  const alunosAtivos = state.alunos.filter(a => a.ativo !== false).length;
+
+  const recentes = [...state.figurinos].slice(0, 4);
+  const empRecentes = [...state.emprestimos].slice(0, 5);
+
+  return `
+  <div style="max-width:1100px">
+    <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-bottom:24px">
+      ${statCard('👗','Total de Figurinos', totalFig, 'rgba(59,130,246,.2)', 'figurinos')}
+      ${statCard('✅','Disponíveis', disponiveis, 'rgba(34,197,94,.2)', 'figurinos')}
+      ${statCard('🤝','Empréstimos Ativos', ativos, 'rgba(240,165,0,.2)', 'emprestimos')}
+      ${statCard('⚠️','Devoluções Atrasadas', atrasados, 'rgba(239,68,68,.2)', 'devolucoes')}
+      ${statCard('👥','Alunos Cadastrados', alunosAtivos, 'rgba(168,85,247,.2)', 'alunos')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <strong style="font-family:var(--font-head)">Figurinos Recentes</strong>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('figurinos')">Ver todos</button>
+        </div>
+        ${recentes.length === 0 ? `<div class="empty" style="padding:30px"><div class="empty-icon">👗</div><p class="empty-text" style="font-size:14px">Nenhum figurino ainda</p><button class="btn btn-primary btn-sm" onclick="navigate('figurino-novo')">Adicionar</button></div>` : `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${recentes.map(f => `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px;background:var(--surface2);border-radius:8px;cursor:pointer" onclick="navigate('figurinos')">
+              <div style="width:40px;height:40px;border-radius:8px;overflow:hidden;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+                ${f.imagemUrl ? `<img src="${f.imagemUrl}" style="width:100%;height:100%;object-fit:cover">` : '👗'}
+              </div>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.nome}</div>
+                <div style="font-size:12px;color:var(--text2)">${CATEGORIAS_LABEL[f.categoria]||f.categoria||''} · ${f.quantidade||1} un.</div>
+              </div>
+              ${badgeDisp(f.quantidadeDisponivel ?? f.quantidade ?? 1)}
+            </div>`).join('')}
+        </div>`}
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <strong style="font-family:var(--font-head)">Últimos Empréstimos</strong>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('emprestimos')">Ver todos</button>
+        </div>
+        ${empRecentes.length === 0 ? `<div class="empty" style="padding:30px"><div class="empty-icon">🤝</div><p class="empty-text" style="font-size:14px">Nenhum empréstimo ainda</p></div>` : `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${empRecentes.map(e => `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px;background:var(--surface2);border-radius:8px">
+              <div style="width:36px;height:36px;border-radius:50%;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">👤</div>
+              <div style="flex:1">
+                <div style="font-weight:500;font-size:14px">${e.alunoNome||'—'}</div>
+                <div style="font-size:12px;color:var(--text2)">Dev: ${formatDate(e.dataDevolucao)}</div>
+              </div>
+              ${statusBadge(e.status)}
+            </div>`).join('')}
+        </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function statCard(icon, label, val, bg, page) {
+  return `<div class="stat-card" onclick="navigate('${page}')" style="cursor:pointer">
+    <div class="stat-icon" style="background:${bg}">${icon}</div>
+    <div><div class="stat-value">${val}</div><div class="stat-label">${label}</div></div>
+  </div>`;
+}
+function badgeDisp(qty) {
+  if (qty <= 0) return `<span class="badge badge-red">Esgotado</span>`;
+  return `<span class="badge badge-green">${qty} disp.</span>`;
+}
+function statusBadge(s) {
+  const map = { ativo:'badge-blue', atrasado:'badge-red', devolvido:'badge-green' };
+  const lbl = { ativo:'Ativo', atrasado:'Atrasado', devolvido:'Devolvido' };
+  return `<span class="badge ${map[s]||'badge-gray'}">${lbl[s]||s}</span>`;
+}
+
+// ── FIGURINOS ────────────────────────────────────────────────
+function renderFigurinos() {
+  const { busca, categoria, cor, tamanho, estado } = state.filtros;
+  let lista = state.figurinos;
+  if (busca) lista = lista.filter(f => f.nome.toLowerCase().includes(busca.toLowerCase()));
+  if (categoria) lista = lista.filter(f => f.categoria === categoria);
+  if (cor) lista = lista.filter(f => f.cor === cor);
+  if (tamanho) lista = lista.filter(f => Array.isArray(f.tamanhos) ? f.tamanhos.includes(tamanho) : f.tamanho === tamanho);
+  if (estado) lista = lista.filter(f => f.estado === estado);
+
+  return `
+  <div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="search-wrap" style="margin-bottom:12px">
+        <span class="search-icon">🔍</span>
+        <input class="form-input" placeholder="Buscar figurino..." value="${busca}" oninput="state.filtros.busca=this.value;render()">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select class="form-select" style="width:auto;flex:1;min-width:120px" onchange="state.filtros.categoria=this.value;render()">
+          <option value="">Categoria</option>
+          ${CATEGORIAS.map(c => `<option value="${c}" ${categoria===c?'selected':''}>${CATEGORIAS_LABEL[c]}</option>`).join('')}
+        </select>
+        <select class="form-select" style="width:auto;flex:1;min-width:100px" onchange="state.filtros.tamanho=this.value;render()">
+          <option value="">Tamanho</option>
+          ${TAMANHOS.map(t => `<option value="${t}" ${tamanho===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <select class="form-select" style="width:auto;flex:1;min-width:100px" onchange="state.filtros.estado=this.value;render()">
+          <option value="">Estado</option>
+          ${ESTADOS.map(e => `<option value="${e}" ${estado===e?'selected':''}>${ESTADOS_LABEL[e]}</option>`).join('')}
+        </select>
+        ${(busca||categoria||cor||tamanho||estado) ? `<button class="btn btn-secondary btn-sm" onclick="state.filtros={busca:'',categoria:'',cor:'',tamanho:'',estado:''};render()">✕ Limpar</button>` : ''}
+      </div>
+    </div>
+
+    ${lista.length === 0 ? `
+      <div class="empty">
+        <div class="empty-icon">👗</div>
+        <p class="empty-text">Nenhum figurino encontrado</p>
+        <button class="btn btn-primary" onclick="navigate('figurino-novo')">＋ Adicionar Figurino</button>
+      </div>` : `
+      <div class="figurino-grid">
+        ${lista.map(f => renderFigurinoCard(f)).join('')}
+      </div>`}
+  </div>`;
+}
+
+function renderFigurinoCard(f) {
+  const disp = f.quantidadeDisponivel ?? f.quantidade ?? 1;
+  return `
+  <div class="figurino-card">
+    <div class="figurino-img" onclick="abrirFigurinoModal('${f.id}')">
+      ${f.imagemUrl ? `<img src="${f.imagemUrl}" onerror="this.parentElement.innerHTML='👗'">` : '👗'}
+    </div>
+    <div class="figurino-info">
+      <div class="figurino-nome" onclick="abrirFigurinoModal('${f.id}')" style="cursor:pointer">${f.nome}</div>
+      <div class="figurino-meta">
+        <span>${CATEGORIAS_LABEL[f.categoria]||f.categoria||'—'}</span>
+        ${f.tamanhos?.length ? `<span>${f.tamanhos.join(', ')}</span>` : (f.tamanho ? `<span>${f.tamanho}</span>` : '')}
+        ${f.cor ? `<span><span class="cor-dot" style="background:${CORES_HEX[f.cor]||f.cor}"></span> ${f.cor}</span>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+        ${badgeDisp(disp)}
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" onclick="navigate('figurino-editar',{id:'${f.id}'})">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmarDeletarFigurino('${f.id}','${f.nome.replace(/'/g,"\\'")}')">🗑️</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function abrirFigurinoModal(id) {
+  const f = state.figurinos.find(x => x.id === id);
+  if (!f) return;
+  const disp = f.quantidadeDisponivel ?? f.quantidade ?? 1;
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg';
+  modal.innerHTML = `
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title">${f.nome}</div>
+      <button class="modal-close" onclick="this.closest('.modal-bg').remove()">✕</button>
+    </div>
+    <div class="modal-body">
+      ${f.imagemUrl ? `<img src="${f.imagemUrl}" style="width:100%;height:220px;object-fit:cover;border-radius:8px;margin-bottom:16px">` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:14px">
+        <div><span style="color:var(--text2)">Categoria</span><br><strong>${CATEGORIAS_LABEL[f.categoria]||f.categoria||'—'}</strong></div>
+        <div><span style="color:var(--text2)">Tamanhos</span><br><strong>${f.tamanhos?.join(', ')||f.tamanho||'—'}</strong></div>
+        <div><span style="color:var(--text2)">Cor</span><br><strong style="display:flex;align-items:center;gap:6px"><span class="cor-dot" style="background:${CORES_HEX[f.cor]||'#888'}"></span>${f.cor||'—'}</strong></div>
+        <div><span style="color:var(--text2)">Estado</span><br><strong>${ESTADOS_LABEL[f.estado]||f.estado||'—'}</strong></div>
+        <div><span style="color:var(--text2)">Quantidade Total</span><br><strong>${f.quantidade||1}</strong></div>
+        <div><span style="color:var(--text2)">Disponíveis</span><br><strong>${disp}</strong></div>
+        ${f.localizacao ? `<div style="grid-column:span 2"><span style="color:var(--text2)">Localização</span><br><strong>${f.localizacao}</strong></div>` : ''}
+        ${f.descricao ? `<div style="grid-column:span 2"><span style="color:var(--text2)">Descrição</span><br><span>${f.descricao}</span></div>` : ''}
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="this.closest('.modal-bg').remove()">Fechar</button>
+      <button class="btn btn-primary" onclick="this.closest('.modal-bg').remove();navigate('figurino-editar',{id:'${id}'})">✏️ Editar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
+}
+
+function confirmarDeletarFigurino(id, nome) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg';
+  modal.innerHTML = `
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header"><div class="modal-title">Confirmar exclusão</div></div>
+    <div class="modal-body"><p>Tem certeza que deseja remover <strong>"${nome}"</strong>? Esta ação não pode ser desfeita.</p></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="this.closest('.modal-bg').remove()">Cancelar</button>
+      <button class="btn btn-danger" onclick="deletarFigurino('${id}');this.closest('.modal-bg').remove()">Excluir</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function deletarFigurino(id) {
+  const f = state.figurinos.find(x => x.id === id);
+  const FB = window.Firebase;
+  if (!FB) return;
+  try {
+    await FB.deletarFigurino(id, f?.fotoPath);
+    toast(`"${f?.nome}" removido com sucesso`);
+    adicionarHistorico('remocao_figurino', `Figurino "${f?.nome}" removido`);
+  } catch(e) {
+    toast('Erro ao remover: ' + e.message, 'error');
+  }
+}
+
+function renderFigurinoForm(id) {
+  const f = id ? state.figurinos.find(x => x.id === id) : null;
+  const v = f || {};
+  const tamanhosSel = v.tamanhos || (v.tamanho ? [v.tamanho] : []);
+
+  return `
+  <div style="max-width:640px">
+    <button class="btn btn-secondary btn-sm" onclick="navigate('figurinos')" style="margin-bottom:20px">← Voltar</button>
+    <div class="card">
+      <h2 style="font-family:var(--font-head);margin-bottom:24px">${id ? 'Editar Figurino' : 'Novo Figurino'}</h2>
+      <form id="figurino-form" onsubmit="salvarFigurinoForm(event,'${id||''}')">
+
+        <div class="form-group">
+          <label class="form-label">Foto do Figurino</label>
+          <div class="upload-area" id="upload-area" onclick="document.getElementById('foto-input').click()" ondrop="handleDrop(event)" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')">
+            ${v.imagemUrl ? `<img src="${v.imagemUrl}" class="upload-preview" id="img-preview">` : `<div id="img-preview-placeholder"><div style="font-size:32px;margin-bottom:8px">📷</div><div style="color:var(--text2);font-size:14px">Clique ou arraste uma imagem<br><span style="font-size:12px">JPG, PNG, WebP — máx 5MB</span></div></div>`}
+          </div>
+          <input type="file" id="foto-input" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="previewFoto(this)">
+          <div class="form-error" id="foto-error"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nome *</label>
+          <input class="form-input" name="nome" placeholder="Ex: Vestido Medieval Vermelho" value="${v.nome||''}" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Categoria *</label>
+            <select class="form-select" name="categoria" required>
+              <option value="">Selecione...</option>
+              ${CATEGORIAS.map(c => `<option value="${c}" ${v.categoria===c?'selected':''}>${CATEGORIAS_LABEL[c]}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Estado de Conservação</label>
+            <select class="form-select" name="estado">
+              ${ESTADOS.map(e => `<option value="${e}" ${(v.estado||'bom')===e?'selected':''}>${ESTADOS_LABEL[e]}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tamanhos disponíveis</label>
+          <div class="chips">
+            ${TAMANHOS.map(t => `<div class="chip ${tamanhosSel.includes(t)?'selected':''}" onclick="toggleTamanho(this,'${t}')" data-val="${t}">${t}</div>`).join('')}
+          </div>
+          <input type="hidden" id="tamanhos-hidden" name="tamanhos" value="${tamanhosSel.join(',')}">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Cor Principal</label>
+            <select class="form-select" name="cor">
+              <option value="">Selecione...</option>
+              ${CORES.map(c => `<option value="${c}" ${v.cor===c?'selected':''}>${c.charAt(0).toUpperCase()+c.slice(1)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Quantidade Total</label>
+            <input class="form-input" type="number" name="quantidade" min="1" value="${v.quantidade||1}">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Quantidade Disponível</label>
+            <input class="form-input" type="number" name="quantidadeDisponivel" min="0" value="${v.quantidadeDisponivel??v.quantidade??1}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Localização no Acervo</label>
+            <input class="form-input" name="localizacao" placeholder="Ex: Prateleira A, Caixão 3" value="${v.localizacao||''}">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Descrição</label>
+          <textarea class="form-textarea" name="descricao" placeholder="Detalhes sobre o figurino...">${v.descricao||''}</textarea>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="navigate('figurinos')">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="submit-btn">💾 ${id ? 'Salvar Alterações' : 'Cadastrar Figurino'}</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function toggleTamanho(el, val) {
+  el.classList.toggle('selected');
+  const hidden = document.getElementById('tamanhos-hidden');
+  const arr = hidden.value ? hidden.value.split(',').filter(Boolean) : [];
+  const idx = arr.indexOf(val);
+  if (idx >= 0) arr.splice(idx, 1); else arr.push(val);
+  hidden.value = arr.join(',');
+}
+
+function previewFoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 5*1024*1024) { document.getElementById('foto-error').textContent = 'Imagem muito grande (máx 5MB)'; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const area = document.getElementById('upload-area');
+    area.innerHTML = `<img src="${e.target.result}" class="upload-preview" id="img-preview" style="display:block">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('foto-input').files = dt.files;
+    previewFoto(document.getElementById('foto-input'));
+  }
+}
+
+async function salvarFigurinoForm(e, id) {
+  e.preventDefault();
+  const form = e.target;
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = '⏳ Salvando...';
+
+  const dados = {
+    nome: form.nome.value.trim(),
+    categoria: form.categoria.value,
+    estado: form.estado.value,
+    tamanhos: form.tamanhos.value ? form.tamanhos.value.split(',').filter(Boolean) : [],
+    cor: form.cor.value,
+    quantidade: parseInt(form.quantidade.value) || 1,
+    quantidadeDisponivel: parseInt(form.quantidadeDisponivel.value) ?? parseInt(form.quantidade.value) ?? 1,
+    localizacao: form.localizacao.value.trim(),
+    descricao: form.descricao.value.trim(),
+  };
+
+  const FB = window.Firebase;
+  if (!FB) { toast('Firebase não inicializado', 'error'); btn.disabled=false; return; }
+
+  try {
+    // Upload foto se tiver
+    const fotoInput = document.getElementById('foto-input');
+    if (fotoInput?.files[0]) {
+      toast('Fazendo upload da imagem...', 'info');
+      if (FB.isConfigured()) {
+        dados.imagemUrl = await FB.uploadImagem(fotoInput.files[0]);
+      } else {
+        // Modo local: converter para data URL
+        dados.imagemUrl = await fileToDataUrl(fotoInput.files[0]);
+      }
+    } else if (id) {
+      const prev = state.figurinos.find(f => f.id === id);
+      if (prev?.imagemUrl) dados.imagemUrl = prev.imagemUrl;
+    }
+
+    if (id) {
+      await FB.atualizarFigurino(id, dados);
+      toast(`Figurino "${dados.nome}" atualizado!`);
+      adicionarHistorico('edicao_figurino', `Figurino "${dados.nome}" atualizado`);
+    } else {
+      await FB.salvarFigurino(dados);
+      toast(`Figurino "${dados.nome}" cadastrado!`);
+      adicionarHistorico('cadastro_figurino', `Figurino "${dados.nome}" adicionado ao acervo`);
+    }
+    navigate('figurinos');
+  } catch(err) {
+    toast('Erro: ' + err.message, 'error');
+    btn.disabled=false; btn.textContent = '💾 Salvar';
+  }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+// ── ALUNOS ───────────────────────────────────────────────────
+function renderAlunos() {
+  const busca = state.filtros.busca;
+  let lista = state.alunos;
+  if (busca) lista = lista.filter(a => a.nome.toLowerCase().includes(busca.toLowerCase()) || (a.matricula||'').includes(busca));
+
+  return `
+  <div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input class="form-input" placeholder="Buscar aluno por nome ou matrícula..." value="${busca}" oninput="state.filtros.busca=this.value;render()">
+      </div>
+    </div>
+
+    ${lista.length === 0 ? `
+      <div class="empty">
+        <div class="empty-icon">👥</div>
+        <p class="empty-text">Nenhum aluno encontrado</p>
+        <button class="btn btn-primary" onclick="navigate('aluno-novo')">＋ Cadastrar Aluno</button>
+      </div>` : `
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Nome</th><th>Matrícula</th><th>Email</th><th>Telefone</th><th>Status</th><th style="text-align:right">Ações</th>
+          </tr></thead>
+          <tbody>
+            ${lista.map(a => `<tr>
+              <td><strong>${a.nome}</strong></td>
+              <td>${a.matricula||'—'}</td>
+              <td>${a.email||'—'}</td>
+              <td>${a.telefone||'—'}</td>
+              <td><span class="badge ${a.ativo!==false?'badge-green':'badge-gray'}">${a.ativo!==false?'Ativo':'Inativo'}</span></td>
+              <td style="text-align:right">
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="btn btn-secondary btn-sm" onclick="navigate('aluno-editar',{id:'${a.id}'})">✏️</button>
+                  <button class="btn btn-danger btn-sm" onclick="confirmarDeletarAluno('${a.id}','${a.nome.replace(/'/g,"\\'")}')">🗑️</button>
+                </div>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`}
+  </div>`;
+}
+
+function confirmarDeletarAluno(id, nome) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg';
+  modal.innerHTML = `<div class="modal" style="max-width:400px">
+    <div class="modal-header"><div class="modal-title">Confirmar exclusão</div></div>
+    <div class="modal-body"><p>Remover aluno <strong>"${nome}"</strong>?</p></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="this.closest('.modal-bg').remove()">Cancelar</button>
+      <button class="btn btn-danger" onclick="deletarAluno('${id}','${nome}');this.closest('.modal-bg').remove()">Excluir</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function deletarAluno(id, nome) {
+  const FB = window.Firebase;
+  try {
+    await FB.deletarAluno(id);
+    toast(`Aluno "${nome}" removido`);
+    adicionarHistorico('remocao_aluno', `Aluno "${nome}" removido`);
+  } catch(e) { toast('Erro: '+e.message, 'error'); }
+}
+
+function renderAlunoForm(id) {
+  const a = id ? state.alunos.find(x => x.id === id) : null;
+  const v = a || {};
+  return `
+  <div style="max-width:560px">
+    <button class="btn btn-secondary btn-sm" onclick="navigate('alunos')" style="margin-bottom:20px">← Voltar</button>
+    <div class="card">
+      <h2 style="font-family:var(--font-head);margin-bottom:24px">${id ? 'Editar Aluno' : 'Novo Aluno'}</h2>
+      <form onsubmit="salvarAlunoForm(event,'${id||''}')">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Nome Completo *</label>
+            <input class="form-input" name="nome" value="${v.nome||''}" required placeholder="Nome do aluno">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Matrícula</label>
+            <input class="form-input" name="matricula" value="${v.matricula||''}" placeholder="Ex: 2024001">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input class="form-input" type="email" name="email" value="${v.email||''}" placeholder="email@exemplo.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telefone</label>
+            <input class="form-input" name="telefone" value="${v.telefone||''}" placeholder="(22) 99999-9999">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Turma / Observações</label>
+          <input class="form-input" name="turma" value="${v.turma||''}" placeholder="Ex: Turma 3A, Teatro Avançado...">
+        </div>
+        ${id ? `<div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" name="ativo">
+            <option value="true" ${v.ativo!==false?'selected':''}>Ativo</option>
+            <option value="false" ${v.ativo===false?'selected':''}>Inativo</option>
+          </select>
+        </div>` : ''}
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="navigate('alunos')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">💾 ${id ? 'Salvar' : 'Cadastrar'}</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+async function salvarAlunoForm(e, id) {
+  e.preventDefault();
+  const form = e.target;
+  const dados = {
+    nome: form.nome.value.trim(),
+    matricula: form.matricula.value.trim(),
+    email: form.email.value.trim(),
+    telefone: form.telefone.value.trim(),
+    turma: form.turma.value.trim(),
+    ativo: form.ativo ? form.ativo.value === 'true' : true,
+  };
+  const FB = window.Firebase;
+  try {
+    if (id) {
+      await FB.atualizarAluno(id, dados);
+      toast(`Aluno "${dados.nome}" atualizado!`);
+      adicionarHistorico('edicao_aluno', `Aluno "${dados.nome}" atualizado`);
+    } else {
+      await FB.salvarAluno(dados);
+      toast(`Aluno "${dados.nome}" cadastrado!`);
+      adicionarHistorico('cadastro_aluno', `Aluno "${dados.nome}" cadastrado`);
+    }
+    navigate('alunos');
+  } catch(err) { toast('Erro: '+err.message, 'error'); }
+}
+
+// ── EMPRÉSTIMOS ───────────────────────────────────────────────
+function renderEmprestimos() {
+  const lista = state.emprestimos.filter(e => e.status !== 'devolvido');
+  return `
+  <div>
+    ${lista.length === 0 ? `
+      <div class="empty">
+        <div class="empty-icon">🤝</div>
+        <p class="empty-text">Nenhum empréstimo ativo</p>
+        <button class="btn btn-primary" onclick="navigate('emprestimo-novo')">＋ Criar Empréstimo</button>
+      </div>` : `
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Aluno</th><th>Figurinos</th><th>Retirada</th><th>Devolução Prev.</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+          <tbody>
+            ${lista.map(e => `<tr>
+              <td><strong>${e.alunoNome||'—'}</strong></td>
+              <td>${(e.itens||[]).map(i=>`<span style="font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px;margin-right:4px">${i.nome||i.figurinoId}</span>`).join('')}</td>
+              <td>${formatDate(e.dataRetirada)}</td>
+              <td>${formatDate(e.dataDevolucao)}</td>
+              <td>${statusBadge(e.status)}</td>
+              <td style="text-align:right">
+                ${e.status !== 'devolvido' ? `<button class="btn btn-primary btn-sm" onclick="registrarDevolucao('${e.id}','${(e.alunoNome||'').replace(/'/g,"\\'")}')">↩️ Devolver</button>` : ''}
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`}
+  </div>`;
+}
+
+function renderEmprestimoForm() {
+  const alunos = state.alunos.filter(a => a.ativo !== false);
+  const figurinosDisp = state.figurinos.filter(f => (f.quantidadeDisponivel ?? f.quantidade ?? 1) > 0);
+
+  const hoje = new Date().toISOString().split('T')[0];
+  const doisSemanas = new Date(Date.now() + 14*86400000).toISOString().split('T')[0];
+
+  return `
+  <div style="max-width:640px">
+    <button class="btn btn-secondary btn-sm" onclick="navigate('emprestimos')" style="margin-bottom:20px">← Voltar</button>
+    <div class="card">
+      <h2 style="font-family:var(--font-head);margin-bottom:24px">Novo Empréstimo</h2>
+      <form onsubmit="salvarEmprestimoForm(event)">
+
+        <div class="form-group">
+          <label class="form-label">Aluno *</label>
+          ${alunos.length === 0
+            ? `<div style="color:var(--text2);font-size:14px">Nenhum aluno cadastrado. <button type="button" class="btn btn-secondary btn-sm" onclick="navigate('aluno-novo')">Cadastrar aluno</button></div>`
+            : `<select class="form-select" name="alunoId" required>
+                <option value="">Selecione o aluno...</option>
+                ${alunos.map(a => `<option value="${a.id}" data-nome="${a.nome}">${a.nome} ${a.matricula?'('+a.matricula+')':''}</option>`).join('')}
+              </select>`}
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Data de Retirada</label>
+            <input class="form-input" type="date" name="dataRetirada" value="${hoje}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Devolução Prevista</label>
+            <input class="form-input" type="date" name="dataDevolucao" value="${doisSemanas}" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Figurinos *</label>
+          <div id="figurinos-sel" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            ${figurinosDisp.length === 0
+              ? `<div style="padding:20px;text-align:center;color:var(--text2)">Nenhum figurino disponível</div>`
+              : figurinosDisp.map(f => `
+              <div class="figurino-pick" style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--border);cursor:pointer" onclick="toggleFigurinoPick('${f.id}',this)">
+                <div style="width:32px;height:32px;border-radius:6px;overflow:hidden;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">
+                  ${f.imagemUrl ? `<img src="${f.imagemUrl}" style="width:100%;height:100%;object-fit:cover">` : '👗'}
+                </div>
+                <div style="flex:1">
+                  <div style="font-size:14px;font-weight:500">${f.nome}</div>
+                  <div style="font-size:12px;color:var(--text2)">${f.tamanhos?.join(', ')||f.tamanho||''} · ${f.quantidadeDisponivel??f.quantidade??1} disponível(is)</div>
+                </div>
+                <div class="pick-check" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                  <span class="check-icon" style="display:none;color:var(--accent)">✓</span>
+                </div>
+              </div>`).join('')}
+          </div>
+          <input type="hidden" id="figurinos-hidden" name="figurinosIds">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Observações</label>
+          <textarea class="form-textarea" name="observacoes" placeholder="Alguma observação sobre o empréstimo..."></textarea>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <button type="button" class="btn btn-secondary" onclick="navigate('emprestimos')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">💾 Registrar Empréstimo</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+const figurinosPick = new Set();
+function toggleFigurinoPick(id, el) {
+  if (figurinosPick.has(id)) {
+    figurinosPick.delete(id);
+    el.style.background = '';
+    el.querySelector('.check-icon').style.display = 'none';
+    el.querySelector('.pick-check').style.borderColor = 'var(--border)';
+  } else {
+    figurinosPick.add(id);
+    el.style.background = 'rgba(240,165,0,.08)';
+    el.querySelector('.check-icon').style.display = 'block';
+    el.querySelector('.pick-check').style.borderColor = 'var(--accent)';
+  }
+  document.getElementById('figurinos-hidden').value = [...figurinosPick].join(',');
+}
+
+async function salvarEmprestimoForm(e) {
+  e.preventDefault();
+  const form = e.target;
+  const sel = form.alunoId;
+  const alunoId = sel.value;
+  const alunoNome = sel.options[sel.selectedIndex]?.dataset.nome || '';
+  const figurinosIds = form.figurinosIds.value.split(',').filter(Boolean);
+
+  if (!figurinosIds.length) { toast('Selecione ao menos um figurino', 'error'); return; }
+
+  const itens = figurinosIds.map(id => {
+    const f = state.figurinos.find(x => x.id === id);
+    return { figurinoId: id, nome: f?.nome || id, quantidade: 1 };
+  });
+
+  const dados = {
+    alunoId, alunoNome,
+    dataRetirada: form.dataRetirada.value,
+    dataDevolucao: form.dataDevolucao.value,
+    observacoes: form.observacoes.value.trim(),
+    itens,
+    status: 'ativo',
+  };
+
+  const FB = window.Firebase;
+  try {
+    await FB.salvarEmprestimo(dados);
+    // Decrementar disponibilidade
+    for (const id of figurinosIds) {
+      const f = state.figurinos.find(x => x.id === id);
+      if (f) {
+        const disp = (f.quantidadeDisponivel ?? f.quantidade ?? 1) - 1;
+        await FB.atualizarFigurino(id, { quantidadeDisponivel: Math.max(0, disp) });
+      }
+    }
+    toast(`Empréstimo para ${alunoNome} registrado!`);
+    adicionarHistorico('emprestimo', `Empréstimo registrado para "${alunoNome}" (${itens.length} peça(s))`);
+    navigate('emprestimos');
+  } catch(err) { toast('Erro: '+err.message, 'error'); }
+}
+
+async function registrarDevolucao(id, alunoNome) {
+  const e = state.emprestimos.find(x => x.id === id);
+  if (!e) return;
+  const FB = window.Firebase;
+  try {
+    await FB.atualizarEmprestimo(id, { status: 'devolvido', dataDevolucaoReal: new Date().toISOString() });
+    // Incrementar disponibilidade
+    for (const item of (e.itens||[])) {
+      const f = state.figurinos.find(x => x.id === item.figurinoId);
+      if (f) {
+        const disp = (f.quantidadeDisponivel ?? 0) + (item.quantidade || 1);
+        await FB.atualizarFigurino(item.figurinoId, { quantidadeDisponivel: Math.min(f.quantidade||1, disp) });
+      }
+    }
+    toast(`Devolução de "${alunoNome}" registrada!`);
+    adicionarHistorico('devolucao', `Devolução registrada de "${alunoNome}"`);
+    render();
+  } catch(err) { toast('Erro: '+err.message, 'error'); }
+}
+
+// ── DEVOLUÇÕES ────────────────────────────────────────────────
+function renderDevolucoes() {
+  const atrasados = state.emprestimos.filter(e => e.status === 'atrasado');
+  const ativos = state.emprestimos.filter(e => e.status === 'ativo');
+  const devolvidos = state.emprestimos.filter(e => e.status === 'devolvido').slice(0, 10);
+
+  function rowDev(e, highlight) {
+    const dias = diasAte(e.dataDevolucao);
+    const info = highlight
+      ? `<span style="color:var(--red);font-size:12px">⚠️ ${Math.abs(dias||0)} dia(s) atrasado</span>`
+      : (dias !== null ? `<span style="color:var(--text2);font-size:12px">${dias} dia(s) restante(s)</span>` : '');
+    return `<tr style="${highlight?'background:rgba(239,68,68,.05)':''}">
+      <td><strong>${e.alunoNome||'—'}</strong></td>
+      <td>${(e.itens||[]).map(i=>`<span style="font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px;margin-right:4px">${i.nome||i.figurinoId}</span>`).join('')||'—'}</td>
+      <td>${formatDate(e.dataDevolucao)}<br>${info}</td>
+      <td>${statusBadge(e.status)}</td>
+      <td style="text-align:right"><button class="btn btn-primary btn-sm" onclick="registrarDevolucao('${e.id}','${(e.alunoNome||'').replace(/'/g,"\\'")}')">↩️ Devolver</button></td>
+    </tr>`;
+  }
+
+  return `
+  <div>
+    ${atrasados.length > 0 ? `
+    <div class="card" style="border-color:rgba(239,68,68,.4);margin-bottom:20px">
+      <h3 style="font-family:var(--font-head);color:var(--red);margin-bottom:16px">⚠️ Atrasados (${atrasados.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Aluno</th><th>Figurinos</th><th>Prazo</th><th>Status</th><th></th></tr></thead>
+        <tbody>${atrasados.map(e => rowDev(e, true)).join('')}</tbody>
+      </table></div>
+    </div>` : ''}
+
+    ${ativos.length > 0 ? `
+    <div class="card" style="margin-bottom:20px">
+      <h3 style="font-family:var(--font-head);margin-bottom:16px">🕐 Em Andamento (${ativos.length})</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Aluno</th><th>Figurinos</th><th>Prazo</th><th>Status</th><th></th></tr></thead>
+        <tbody>${ativos.map(e => rowDev(e, false)).join('')}</tbody>
+      </table></div>
+    </div>` : ''}
+
+    ${devolvidos.length > 0 ? `
+    <div class="card">
+      <h3 style="font-family:var(--font-head);margin-bottom:16px">✅ Devolvidos Recentes</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Aluno</th><th>Figurinos</th><th>Data Devolução</th><th>Status</th><th></th></tr></thead>
+        <tbody>${devolvidos.map(e => `<tr>
+          <td>${e.alunoNome||'—'}</td>
+          <td>${(e.itens||[]).map(i=>`<span style="font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px;margin-right:4px">${i.nome||i.figurinoId}</span>`).join('')}</td>
+          <td>${formatDate(e.dataDevolucaoReal||e.dataDevolucao)}</td>
+          <td>${statusBadge(e.status)}</td>
+          <td></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : ''}
+
+    ${atrasados.length===0 && ativos.length===0 && devolvidos.length===0 ? `
+      <div class="empty"><div class="empty-icon">✅</div><p class="empty-text">Nenhum empréstimo registrado</p></div>` : ''}
+  </div>`;
+}
+
+// ── HISTÓRICO DETALHADO ───────────────────────────────────────
+function renderHistorico() {
+  const ICONS = {
+    cadastro_figurino:'👗', edicao_figurino:'✏️', remocao_figurino:'🗑️',
+    cadastro_aluno:'👤', edicao_aluno:'✏️', remocao_aluno:'🗑️',
+    emprestimo:'🤝', devolucao:'↩️',
+  };
+  const TIPOS_LABEL = {
+    cadastro_figurino:'Cadastro de Figurino', edicao_figurino:'Edição de Figurino',
+    remocao_figurino:'Remoção de Figurino', cadastro_aluno:'Cadastro de Aluno',
+    edicao_aluno:'Edição de Aluno', remocao_aluno:'Remoção de Aluno',
+    emprestimo:'Empréstimo Registrado', devolucao:'Devolução Registrada',
+  };
+
+  if (!state.histFiltros) state.histFiltros = { busca:'', tipo:'', dataIni:'', dataFim:'' };
+  const hf = state.histFiltros;
+
+  let lista = state.historico;
+  if (hf.busca) lista = lista.filter(h => h.descricao.toLowerCase().includes(hf.busca.toLowerCase()));
+  if (hf.tipo) lista = lista.filter(h => h.tipo === hf.tipo);
+  if (hf.dataIni) lista = lista.filter(h => new Date(h.timestamp) >= new Date(hf.dataIni));
+  if (hf.dataFim) lista = lista.filter(h => new Date(h.timestamp) <= new Date(hf.dataFim + 'T23:59:59'));
+
+  const contagens = {};
+  state.historico.forEach(h => { contagens[h.tipo] = (contagens[h.tipo]||0)+1; });
+
+  return `
+  <div>
+    <!-- Filtros -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="search-wrap" style="grid-column:span 2">
+          <span class="search-icon">🔍</span>
+          <input class="form-input" placeholder="Buscar no histórico..." value="${hf.busca}"
+            oninput="state.histFiltros.busca=this.value;render()">
+        </div>
+        <div>
+          <label class="form-label">Tipo de ação</label>
+          <select class="form-select" onchange="state.histFiltros.tipo=this.value;render()">
+            <option value="">Todos os tipos</option>
+            ${Object.entries(TIPOS_LABEL).map(([k,v])=>`<option value="${k}" ${hf.tipo===k?'selected':''}>${v} ${contagens[k]?'('+contagens[k]+')':''}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label class="form-label">De</label>
+            <input class="form-input" type="date" value="${hf.dataIni}" onchange="state.histFiltros.dataIni=this.value;render()">
+          </div>
+          <div>
+            <label class="form-label">Até</label>
+            <input class="form-input" type="date" value="${hf.dataFim}" onchange="state.histFiltros.dataFim=this.value;render()">
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:13px;color:var(--text2)">${lista.length} registro(s) encontrado(s)</span>
+        <div style="display:flex;gap:8px">
+          ${(hf.busca||hf.tipo||hf.dataIni||hf.dataFim)?`<button class="btn btn-secondary btn-sm" onclick="state.histFiltros={busca:'',tipo:'',dataIni:'',dataFim:''};render()">✕ Limpar filtros</button>`:''}
+          <button class="btn btn-secondary btn-sm" onclick="exportarHistorico()">⬇️ Exportar CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resumo por tipo -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px">
+      ${Object.entries(TIPOS_LABEL).filter(([k])=>contagens[k]).map(([k,v])=>`
+        <div class="stat-card" style="padding:14px;cursor:pointer" onclick="state.histFiltros.tipo='${k}';render()">
+          <div style="font-size:20px">${ICONS[k]||'📌'}</div>
+          <div><div style="font-family:var(--font-head);font-size:20px;font-weight:800">${contagens[k]||0}</div>
+          <div style="font-size:11px;color:var(--text2)">${v}</div></div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Tabela -->
+    ${lista.length === 0 ? `
+      <div class="empty"><div class="empty-icon">📋</div><p class="empty-text">Nenhum registro encontrado</p></div>` : `
+    <div class="card" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th style="width:40px"></th>
+          <th>Tipo</th>
+          <th>Descrição</th>
+          <th>Data</th>
+          <th>Hora</th>
+        </tr></thead>
+        <tbody>
+          ${lista.map(h => {
+            const dt = new Date(h.timestamp);
+            return `<tr>
+              <td style="text-align:center;font-size:18px">${ICONS[h.tipo]||'📌'}</td>
+              <td><span class="badge ${tipoBadgeClass(h.tipo)}">${TIPOS_LABEL[h.tipo]||h.tipo}</span></td>
+              <td style="max-width:300px">${h.descricao}</td>
+              <td style="color:var(--text2);font-size:13px;white-space:nowrap">${dt.toLocaleDateString('pt-BR')}</td>
+              <td style="color:var(--text2);font-size:13px">${dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
+    </div>`}
+  </div>`;
+}
+
+function tipoBadgeClass(tipo) {
+  if (tipo.startsWith('cadastro')) return 'badge-green';
+  if (tipo.startsWith('edicao')) return 'badge-blue';
+  if (tipo.startsWith('remocao')) return 'badge-red';
+  if (tipo === 'emprestimo') return 'badge-yellow';
+  if (tipo === 'devolucao') return 'badge-purple';
+  return 'badge-gray';
+}
+
+function exportarHistorico() {
+  const linhas = [['Tipo','Descrição','Data','Hora']];
+  state.historico.forEach(h => {
+    const dt = new Date(h.timestamp);
+    linhas.push([h.tipo, h.descricao, dt.toLocaleDateString('pt-BR'), dt.toLocaleTimeString('pt-BR')]);
+  });
+  const csv = linhas.map(l => l.map(c => `"${c}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`historico-${new Date().toISOString().split('T')[0]}.csv`; a.click();
+  toast('Histórico exportado!');
+}
+
+// ── RELATÓRIOS SEMESTRAIS ────────────────────────────────────
+function renderRelatorios() {
+  if (!state.relSemestre) state.relSemestre = getSemestreAtual();
+  const sem = state.relSemestre;
+
+  const SEMESTRES = [
+    { id:'2026-1', label:'1º Semestre 2026 (Maio–Outubro)', ini: new Date('2026-05-01'), fim: new Date('2026-10-31T23:59:59') },
+    { id:'2026-2', label:'2º Semestre 2026 (Novembro–Abril 2027)', ini: new Date('2026-11-01'), fim: new Date('2027-04-30T23:59:59') },
+    { id:'2025-2', label:'2º Semestre 2025 (Nov 2025–Abr 2026)', ini: new Date('2025-11-01'), fim: new Date('2026-04-30T23:59:59') },
+  ];
+
+  const semObj = SEMESTRES.find(s=>s.id===sem) || SEMESTRES[0];
+  const { ini, fim } = semObj;
+
+  const empSem = state.emprestimos.filter(e => {
+    const d = e.dataRetirada ? new Date(e.dataRetirada) : (e.criadoEm?.toDate ? e.criadoEm.toDate() : new Date(e.criadoEm||0));
+    return d >= ini && d <= fim;
+  });
+  const devSem = empSem.filter(e => e.status === 'devolvido');
+  const atrasadosSem = empSem.filter(e => e.status === 'atrasado');
+  const ativosSem = empSem.filter(e => e.status === 'ativo');
+
+  // Top figurinos mais emprestados
+  const contFig = {};
+  empSem.forEach(e => (e.itens||[]).forEach(i => { contFig[i.nome||i.figurinoId] = (contFig[i.nome||i.figurinoId]||0)+1; }));
+  const topFig = Object.entries(contFig).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  // Top alunos
+  const contAluno = {};
+  empSem.forEach(e => { contAluno[e.alunoNome||'?'] = (contAluno[e.alunoNome||'?']||0)+1; });
+  const topAlunos = Object.entries(contAluno).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  // Empréstimos por mês
+  const porMes = {};
+  empSem.forEach(e => {
+    const d = e.dataRetirada ? new Date(e.dataRetirada) : new Date(e.criadoEm||0);
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    porMes[k] = (porMes[k]||0)+1;
+  });
+  const meses = Object.entries(porMes).sort();
+
+  // Taxa de devolução no prazo
+  const taxaDevolucao = empSem.length > 0 ? Math.round((devSem.length/empSem.length)*100) : 0;
+
+  return `
+  <div style="max-width:1000px">
+    <!-- Seletor de semestre -->
+    <div class="card" style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <strong style="font-family:var(--font-head);font-size:15px">Período:</strong>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${SEMESTRES.map(s=>`<button class="btn ${sem===s.id?'btn-primary':'btn-secondary'} btn-sm" onclick="state.relSemestre='${s.id}';render()">${s.label}</button>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="exportarRelatorio('${sem}')" style="margin-left:auto">⬇️ Exportar PDF</button>
+      </div>
+    </div>
+
+    <!-- Título do relatório -->
+    <div style="margin-bottom:24px">
+      <h2 style="font-family:var(--font-head);font-size:22px;font-weight:800">${semObj.label}</h2>
+      <p style="color:var(--text2);font-size:14px">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>
+    </div>
+
+    <!-- KPIs -->
+    <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-bottom:24px">
+      ${statCard('🤝','Empréstimos no Período', empSem.length, 'rgba(59,130,246,.2)', 'emprestimos')}
+      ${statCard('✅','Devolvidos', devSem.length, 'rgba(34,197,94,.2)', 'devolucoes')}
+      ${statCard('⚠️','Atrasados', atrasadosSem.length, 'rgba(239,68,68,.2)', 'devolucoes')}
+      ${statCard('🕐','Em Andamento', ativosSem.length, 'rgba(240,165,0,.2)', 'emprestimos')}
+      ${statCard('📊','Taxa de Devolução', taxaDevolucao+'%', 'rgba(168,85,247,.2)', 'relatorios')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+      <!-- Top figurinos -->
+      <div class="card">
+        <h3 style="font-family:var(--font-head);margin-bottom:16px">👗 Figurinos Mais Emprestados</h3>
+        ${topFig.length===0 ? `<p style="color:var(--text2);font-size:14px">Sem dados no período</p>` : `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${topFig.map(([nome,qtd],i)=>`
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:24px;height:24px;background:${i===0?'var(--accent)':i===1?'var(--text2)':'var(--border)'};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${i===0?'#0c0c10':'var(--text)'};">${i+1}</div>
+              <div style="flex:1;font-size:14px">${nome}</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="height:6px;background:var(--accent);border-radius:3px;width:${Math.round((qtd/topFig[0][1])*80)}px"></div>
+                <span style="font-family:var(--font-head);font-weight:700">${qtd}</span>
+              </div>
+            </div>`).join('')}
+        </div>`}
+      </div>
+
+      <!-- Top alunos -->
+      <div class="card">
+        <h3 style="font-family:var(--font-head);margin-bottom:16px">👥 Alunos Mais Ativos</h3>
+        ${topAlunos.length===0 ? `<p style="color:var(--text2);font-size:14px">Sem dados no período</p>` : `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${topAlunos.map(([nome,qtd],i)=>`
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:24px;height:24px;background:${i===0?'var(--blue)':'var(--border)'};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${i===0?'#fff':'var(--text)'};">${i+1}</div>
+              <div style="flex:1;font-size:14px">${nome}</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="height:6px;background:var(--blue);border-radius:3px;width:${Math.round((qtd/topAlunos[0][1])*80)}px"></div>
+                <span style="font-family:var(--font-head);font-weight:700">${qtd}</span>
+              </div>
+            </div>`).join('')}
+        </div>`}
+      </div>
+    </div>
+
+    <!-- Empréstimos por mês -->
+    <div class="card" style="margin-bottom:24px">
+      <h3 style="font-family:var(--font-head);margin-bottom:20px">📅 Empréstimos por Mês</h3>
+      ${meses.length===0 ? `<p style="color:var(--text2);font-size:14px">Sem dados no período</p>` : `
+      <div style="display:flex;align-items:flex-end;gap:12px;height:120px;padding-bottom:8px">
+        ${meses.map(([mes,qtd])=>{
+          const max = Math.max(...meses.map(m=>m[1]));
+          const h = Math.max(12, Math.round((qtd/max)*100));
+          const [ano,m] = mes.split('-');
+          const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px">
+            <span style="font-family:var(--font-head);font-size:12px;font-weight:700">${qtd}</span>
+            <div style="width:100%;background:var(--accent);border-radius:4px 4px 0 0;height:${h}px;opacity:.85"></div>
+            <span style="font-size:11px;color:var(--text2)">${nomes[parseInt(m)-1]}</span>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>
+
+    <!-- Lista completa de empréstimos do semestre -->
+    <div class="card" style="padding:0">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border)">
+        <h3 style="font-family:var(--font-head)">📋 Todos os Empréstimos do Período (${empSem.length})</h3>
+      </div>
+      ${empSem.length===0 ? `<div class="empty" style="padding:40px"><p class="empty-text">Nenhum empréstimo neste período</p></div>` : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Aluno</th><th>Figurinos</th><th>Retirada</th><th>Devolução</th><th>Status</th></tr></thead>
+        <tbody>
+          ${empSem.map(e=>`<tr>
+            <td><strong>${e.alunoNome||'—'}</strong></td>
+            <td>${(e.itens||[]).map(i=>`<span style="font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px;margin-right:4px">${i.nome||i.figurinoId}</span>`).join('')||'—'}</td>
+            <td style="font-size:13px">${formatDate(e.dataRetirada)}</td>
+            <td style="font-size:13px">${formatDate(e.dataDevolucao)}</td>
+            <td>${statusBadge(e.status)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`}
+    </div>
+  </div>`;
+}
+
+function getSemestreAtual() {
+  const m = new Date().getMonth()+1;
+  return (m >= 5 && m <= 10) ? '2026-1' : '2026-2';
+}
+
+function exportarRelatorio(semId) {
+  const semLabels = {'2026-1':'1S2026_Mai-Out','2026-2':'2S2026_Nov-Abr','2025-2':'2S2025'};
+  const label = semLabels[semId]||semId;
+  const ini = semId==='2026-1' ? new Date('2026-05-01') : semId==='2026-2' ? new Date('2026-11-01') : new Date('2025-11-01');
+  const fim = semId==='2026-1' ? new Date('2026-10-31') : semId==='2026-2' ? new Date('2027-04-30') : new Date('2026-04-30');
+  const empSem = state.emprestimos.filter(e => {
+    const d = e.dataRetirada ? new Date(e.dataRetirada) : new Date(e.criadoEm||0);
+    return d >= ini && d <= fim;
+  });
+  const linhas = [['Aluno','Figurinos','Data Retirada','Data Devolução','Status']];
+  empSem.forEach(e => linhas.push([
+    e.alunoNome||'—',
+    (e.itens||[]).map(i=>i.nome||i.figurinoId).join('; '),
+    formatDate(e.dataRetirada), formatDate(e.dataDevolucao), e.status
+  ]));
+  const csv = linhas.map(l=>l.map(c=>`"${c}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`relatorio-${label}.csv`; a.click();
+  toast('Relatório exportado!');
+}
+
+// ── ANÁLISES ─────────────────────────────────────────────────
+function renderAnalises() {
+  const totalFig = state.figurinos.length;
+  const totalAlunos = state.alunos.length;
+  const totalEmp = state.emprestimos.length;
+  const totalDev = state.emprestimos.filter(e=>e.status==='devolvido').length;
+  const totalAtrasados = state.emprestimos.filter(e=>e.status==='atrasado').length;
+  const totalAtivos = state.emprestimos.filter(e=>e.status==='ativo').length;
+  const taxaGeral = totalEmp > 0 ? Math.round((totalDev/totalEmp)*100) : 0;
+
+  // Distribuição por categoria
+  const porCat = {};
+  state.figurinos.forEach(f => { const c = f.categoria||'outro'; porCat[c]=(porCat[c]||0)+1; });
+
+  // Distribuição por estado de conservação
+  const porEstado = {};
+  state.figurinos.forEach(f => { const e = f.estado||'bom'; porEstado[e]=(porEstado[e]||0)+1; });
+
+  // Figurinos sem empréstimos (nunca usados)
+  const usados = new Set(state.emprestimos.flatMap(e=>(e.itens||[]).map(i=>i.figurinoId)));
+  const semUso = state.figurinos.filter(f=>!usados.has(f.id));
+
+  // Alunos com empréstimos atrasados
+  const alunosAtrasados = [...new Set(state.emprestimos.filter(e=>e.status==='atrasado').map(e=>e.alunoNome))];
+
+  // Média de dias de empréstimo
+  const duracoes = state.emprestimos.filter(e=>e.dataRetirada&&e.dataDevolucao).map(e=>{
+    return Math.ceil((new Date(e.dataDevolucao)-new Date(e.dataRetirada))/86400000);
+  });
+  const mediaDias = duracoes.length > 0 ? Math.round(duracoes.reduce((a,b)=>a+b,0)/duracoes.length) : 0;
+
+  // Ocupação do acervo
+  const totalPecas = state.figurinos.reduce((s,f)=>s+(f.quantidade||1),0);
+  const totalDisp = state.figurinos.reduce((s,f)=>s+(f.quantidadeDisponivel??f.quantidade??1),0);
+  const taxaOcup = totalPecas > 0 ? Math.round(((totalPecas-totalDisp)/totalPecas)*100) : 0;
+
+  function barChart(items, cor) {
+    if (!items.length) return `<p style="color:var(--text2);font-size:14px">Sem dados</p>`;
+    const max = Math.max(...items.map(i=>i[1]));
+    return items.map(([label,val]) => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:110px;font-size:13px;color:var(--text2);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
+        <div style="flex:1;height:22px;background:var(--surface2);border-radius:4px;overflow:hidden">
+          <div style="height:100%;background:${cor};width:${Math.round((val/max)*100)}%;border-radius:4px;transition:width .5s;display:flex;align-items:center;padding-left:8px">
+            <span style="font-size:12px;font-weight:700;color:#fff">${val}</span>
+          </div>
+        </div>
+      </div>`).join('');
+  }
+
+  const catItems = Object.entries(porCat).map(([k,v])=>[CATEGORIAS_LABEL[k]||k,v]).sort((a,b)=>b[1]-a[1]);
+  const estItems = Object.entries(porEstado).map(([k,v])=>[ESTADOS_LABEL[k]||k,v]).sort((a,b)=>b[1]-a[1]);
+
+  return `
+  <div style="max-width:1000px">
+    <!-- Indicadores gerais -->
+    <h3 style="font-family:var(--font-head);margin-bottom:16px">📊 Indicadores Gerais</h3>
+    <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-bottom:28px">
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,.2)">📦</div><div><div class="stat-value">${totalFig}</div><div class="stat-label">Figurinos Cadastrados</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,.2)">👥</div><div><div class="stat-value">${totalAlunos}</div><div class="stat-label">Alunos Cadastrados</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(240,165,0,.2)">🤝</div><div><div class="stat-value">${totalEmp}</div><div class="stat-label">Total de Empréstimos</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,.2)">%</div><div><div class="stat-value">${taxaGeral}%</div><div class="stat-label">Taxa de Devolução</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,.2)">📅</div><div><div class="stat-value">${mediaDias}d</div><div class="stat-label">Média de Empréstimo</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(255,107,53,.2)">🔄</div><div><div class="stat-value">${taxaOcup}%</div><div class="stat-label">Taxa de Ocupação</div></div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+      <!-- Distribuição por categoria -->
+      <div class="card">
+        <h3 style="font-family:var(--font-head);margin-bottom:18px">👗 Acervo por Categoria</h3>
+        ${barChart(catItems,'var(--accent)')}
+      </div>
+      <!-- Estado de conservação -->
+      <div class="card">
+        <h3 style="font-family:var(--font-head);margin-bottom:18px">🔍 Estado de Conservação</h3>
+        ${barChart(estItems,'var(--blue)')}
+      </div>
+    </div>
+
+    <!-- Status dos empréstimos -->
+    <div class="card" style="margin-bottom:24px">
+      <h3 style="font-family:var(--font-head);margin-bottom:20px">🤝 Status dos Empréstimos</h3>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+        ${[
+          ['✅ Devolvidos', totalDev, 'var(--green)', totalEmp],
+          ['🕐 Ativos', totalAtivos, 'var(--blue)', totalEmp],
+          ['⚠️ Atrasados', totalAtrasados, 'var(--red)', totalEmp],
+        ].map(([label,val,cor,tot]) => `
+          <div style="text-align:center;padding:20px;background:var(--surface2);border-radius:var(--radius)">
+            <div style="font-family:var(--font-head);font-size:32px;font-weight:800;color:${cor}">${val}</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:4px">${label}</div>
+            <div style="margin-top:12px;height:4px;background:var(--border);border-radius:2px">
+              <div style="height:100%;background:${cor};width:${tot>0?Math.round((val/tot)*100):0}%;border-radius:2px"></div>
+            </div>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">${tot>0?Math.round((val/tot)*100):0}% do total</div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+      <!-- Alunos com atrasos -->
+      <div class="card" style="border-color:${alunosAtrasados.length?'rgba(239,68,68,.4)':'var(--border)'}">
+        <h3 style="font-family:var(--font-head);margin-bottom:16px;color:${alunosAtrasados.length?'var(--red)':'var(--text)'}">
+          ⚠️ Alunos com Atraso (${alunosAtrasados.length})
+        </h3>
+        ${alunosAtrasados.length===0 ? `<p style="color:var(--green);font-size:14px">✅ Nenhum aluno com atraso!</p>` : `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${alunosAtrasados.map(n=>`
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(239,68,68,.08);border-radius:8px;border:1px solid rgba(239,68,68,.2)">
+              <span style="font-size:16px">👤</span>
+              <span style="font-size:14px">${n}</span>
+            </div>`).join('')}
+        </div>`}
+      </div>
+
+      <!-- Figurinos sem uso -->
+      <div class="card">
+        <h3 style="font-family:var(--font-head);margin-bottom:16px">😴 Figurinos Sem Uso (${semUso.length})</h3>
+        ${semUso.length===0 ? `<p style="color:var(--green);font-size:14px">✅ Todos os figurinos já foram emprestados!</p>` : `
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto">
+          ${semUso.map(f=>`
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:14px">👗</span>
+              <span style="font-size:13px">${f.nome}</span>
+              <span class="badge badge-gray" style="margin-left:auto">${CATEGORIAS_LABEL[f.categoria]||f.categoria||'—'}</span>
+            </div>`).join('')}
+        </div>`}
+      </div>
+    </div>
+
+    <!-- Insights automáticos -->
+    <div class="card" style="border-color:rgba(240,165,0,.3)">
+      <h3 style="font-family:var(--font-head);margin-bottom:16px">💡 Insights</h3>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${gerarInsights(taxaGeral, taxaOcup, atrasadosSem=totalAtrasados, semUso, mediaDias, totalEmp).map(ins=>`
+          <div style="display:flex;gap:10px;padding:12px;background:var(--surface2);border-radius:8px;font-size:14px">
+            <span style="font-size:18px">${ins.icon}</span>
+            <div>
+              <strong>${ins.titulo}</strong><br>
+              <span style="color:var(--text2)">${ins.texto}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+function gerarInsights(taxaDev, taxaOcup, atrasados, semUso, mediaDias, totalEmp) {
+  const ins = [];
+  if (taxaDev >= 90) ins.push({icon:'🏆', titulo:'Excelente taxa de devolução!', texto:`${taxaDev}% dos empréstimos foram devolvidos. O acervo está sendo bem gerenciado.`});
+  else if (taxaDev >= 70) ins.push({icon:'✅', titulo:'Boa taxa de devolução', texto:`${taxaDev}% de devoluções. Mantenha o acompanhamento dos prazos.`});
+  else if (taxaDev > 0) ins.push({icon:'⚠️', titulo:'Taxa de devolução abaixo do ideal', texto:`Apenas ${taxaDev}% foram devolvidos. Considere reforçar a comunicação com os alunos.`});
+
+  if (taxaOcup >= 80) ins.push({icon:'🔥', titulo:'Acervo muito ocupado', texto:`${taxaOcup}% das peças estão emprestadas. Considere ampliar o acervo.`});
+  else if (taxaOcup >= 50) ins.push({icon:'📦', titulo:'Boa utilização do acervo', texto:`${taxaOcup}% do acervo em uso.`});
+  else ins.push({icon:'💤', titulo:'Acervo subutilizado', texto:`Apenas ${taxaOcup}% das peças estão em uso. Divulgue mais o acervo!`});
+
+  if (atrasados > 0) ins.push({icon:'⏰', titulo:`${atrasados} empréstimo(s) em atraso`, texto:'Entre em contato com os alunos para regularizar a devolução.'});
+
+  if (semUso.length > 0) ins.push({icon:'🔎', titulo:`${semUso.length} figurino(s) nunca emprestado(s)`, texto:'Considere divulgar esses itens ou verificar se estão em boas condições.'});
+
+  if (mediaDias > 0) ins.push({icon:'📅', titulo:`Média de ${mediaDias} dias por empréstimo`, texto: mediaDias > 21 ? 'Os empréstimos estão demorando muito. Revise os prazos.' : 'Prazo médio saudável para os empréstimos.'});
+
+  if (totalEmp === 0) ins.push({icon:'🚀', titulo:'Comece a registrar empréstimos!', texto:'Nenhum empréstimo registrado ainda. Use o sistema para controlar o acervo.'});
+
+  return ins;
+}
+
+// ── CONFIGURAÇÕES ─────────────────────────────────────────────
+function renderConfig() {
+  const configured = window.Firebase?.isConfigured();
+  return `
+  <div style="max-width:700px">
+    <div class="card" style="margin-bottom:20px;border-color:${configured?'rgba(34,197,94,.4)':'rgba(240,165,0,.4)'}">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:24px">${configured?'✅':'⚠️'}</span>
+        <div>
+          <strong style="font-family:var(--font-head)">${configured?'Firebase Conectado':'Firebase Não Configurado'}</strong>
+          <div style="font-size:14px;color:var(--text2);">${configured?'Dados sendo salvos na nuvem em tempo real':'Dados salvos apenas localmente (perdem com limpeza do navegador)'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h3 style="font-family:var(--font-head);margin-bottom:20px">🚀 Como configurar Firebase (gratuito)</h3>
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div>Acesse <a href="https://console.firebase.google.com" target="_blank" style="color:var(--accent)">console.firebase.google.com</a> e crie um projeto (conta Google necessária)</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div>No projeto, vá em <strong>Project Settings (⚙️) → Adicionar app → Web</strong>. Copie as configurações <code style="background:var(--surface2);padding:2px 6px;border-radius:4px">firebaseConfig</code></div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>Vá em <strong>Firestore Database → Criar banco de dados → Modo de teste</strong></div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div>Vá em <strong>Storage → Começar → Modo de teste</strong></div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div>Neste arquivo HTML, localize o bloco <code style="background:var(--surface2);padding:2px 6px;border-radius:4px">const firebaseConfig = {</code> e substitua com suas configurações</div>
+      </div>
+
+      <div class="code-block">// Exemplo de como ficará:
+const firebaseConfig = {
+  apiKey: "AIzaSyAbc123...",
+  authDomain: "meu-acervo.firebaseapp.com",
+  projectId: "meu-acervo",
+  storageBucket: "meu-acervo.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abc123..."
+};</div>
+
+      <div class="step" style="margin-top:16px">
+        <div class="step-num">6</div>
+        <div>Hospede o arquivo em qualquer serviço gratuito:
+          <ul style="margin-top:8px;padding-left:20px;color:var(--text2);font-size:14px;line-height:1.8">
+            <li><a href="https://pages.github.com" target="_blank" style="color:var(--accent)">GitHub Pages</a> — gratuito, apenas faça upload do arquivo</li>
+            <li><a href="https://firebase.google.com/docs/hosting" target="_blank" style="color:var(--accent)">Firebase Hosting</a> — integrado ao projeto Firebase</li>
+            <li><a href="https://netlify.com" target="_blank" style="color:var(--accent)">Netlify</a> — arraste e solte o arquivo HTML</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h3 style="font-family:var(--font-head);margin-bottom:16px">📱 Acesso em Qualquer Dispositivo</h3>
+      <p style="color:var(--text2);font-size:14px;line-height:1.7">
+        Uma vez hospedado, qualquer pessoa com o link pode acessar o sistema — celular, tablet, computador.
+        Os dados são sincronizados em <strong style="color:var(--text)">tempo real</strong>: se alguém cadastrar um figurino em um celular, aparece imediatamente em todos os outros dispositivos.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3 style="font-family:var(--font-head);margin-bottom:16px">💾 Exportar Dados (Backup)</h3>
+      <p style="color:var(--text2);font-size:14px;margin-bottom:16px">Baixe todos os dados como arquivo JSON:</p>
+      <button class="btn btn-secondary" onclick="exportarDados()">⬇️ Exportar Tudo como JSON</button>
+    </div>
+  </div>`;
+}
+
+function exportarDados() {
+  const dados = {
+    figurinos: state.figurinos,
+    alunos: state.alunos,
+    emprestimos: state.emprestimos,
+    exportadoEm: new Date().toISOString(),
+  };
+  const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `acervo-figurinos-${new Date().toISOString().split('T')[0]}.json`;
+  a.click(); URL.revokeObjectURL(url);
+  toast('Dados exportados!');
+}
+
+// ── HISTÓRICO LOCAL ───────────────────────────────────────────
+function adicionarHistorico(tipo, descricao) {
+  state.historico.unshift({ tipo, descricao, timestamp: new Date().toISOString() });
+  if (state.historico.length > 200) state.historico.pop();
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+render();
+
+// Responsive: mostrar botão menu em mobile
+if (window.innerWidth < 768) {
+  document.getElementById('menu-btn').style.display = 'flex';
+  document.getElementById('sidebar').classList.add('collapsed');
+}
+</script>
+</body>
+</html>
